@@ -30,7 +30,9 @@ fn main() {
     //     )
     //     .unwrap();
 
+    let mut config = prost_build::Config::new();
+    config.bytes(&["."]);
     tonic_build::configure()
-        .compile(&["proto/helloworld/helloworld.proto"], &["proto"])
+        .compile_with_config(config, &["proto/helloworld/helloworld.proto"], &["proto"])
         .unwrap();
 }

@@ -24,6 +24,8 @@ package helloworld;
 service Greeter {
   // Sends a greeting
   rpc SayHello (HelloRequest) returns (HelloReply) {}
+  // Sends a greeting
+  rpc SayHelloBytes (HelloRequestBytes) returns (HelloReplyBytes) {}
 }
 
 // The request message containing the user's name.
@@ -34,4 +36,14 @@ message HelloRequest {
 // The response message containing the greetings
 message HelloReply {
   string message = 1;
+}
+
+// The request message containing the user's name.
+message HelloRequestBytes {
+  bytes name = 1;
+}
+
+// The response message containing the greetings
+message HelloReplyBytes {
+  bytes message = 1;
 }
