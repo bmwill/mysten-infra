@@ -3,7 +3,8 @@
 
 use anyhow::Result;
 use rccheck::{ed25519_certgen::Ed25519, Certifiable};
-use std::sync::Arc;
+use std::{net::SocketAddr, sync::Arc};
+use tonic::transport::{Channel, ClientTlsConfig, Server, ServerTlsConfig};
 
 static SUPPORTED_SIG_ALGS: &[&webpki::SignatureAlgorithm] = &[&webpki::ED25519];
 
@@ -199,40 +200,81 @@ impl ToPKCS8 for ed25519_dalek::Keypair {
     }
 }
 
+#[derive(Clone)]
 pub struct Config {
-    pub client: rustls::ClientConfig,
-    pub server: rustls::ServerConfig,
+    client: rustls::ClientConfig,
+    server: rustls::ServerConfig,
+    server_name: String,
 }
 
 impl Config {
-    pub fn random() -> Result<Self> {
-        let server_name = "foo".to_owned();
-        let mut rng = rand::thread_rng();
-        let keypair = ed25519_dalek::Keypair::generate(&mut rng);
-
+    pub fn new(keypair: ed25519_dalek::Keypair, server_name: &str) -> Result<Self> {
+        let server_name = server_name.to_owned();
         let cert_verifier = Arc::new(CertVerifier(server_name.clone()));
-        let (certificate, pkcs8_der) = Self::generate_cert(&keypair, &server_name);
+        let (certificate, pkcs8_der) = Self::generate_cert(keypair, &server_name);
 
         let server_config = Self::server_config(
             certificate.clone(),
             pkcs8_der.clone(),
             cert_verifier.clone(),
         )?;
-        let client_config =
-            Self::client_config(certificate.clone(), pkcs8_der.clone(), cert_verifier)?;
+        let client_config = Self::client_config(certificate, pkcs8_der, cert_verifier)?;
 
         Ok(Self {
             client: client_config,
             server: server_config,
+            server_name,
         })
     }
 
+    pub fn random(server_name: &str) -> Result<Self> {
+        let mut rng = rand::thread_rng();
+        let keypair = ed25519_dalek::Keypair::generate(&mut rng);
+
+        Self::new(keypair, server_name)
+    }
+
+    pub fn server_name(&self) -> &str {
+        &self.server_name
+    }
+
+    pub fn rustls_client_config(&self) -> &rustls::ClientConfig {
+        &self.client
+    }
+
+    pub fn rustls_server_config(&self) -> &rustls::ServerConfig {
+        &self.server
+    }
+
+    pub fn tonic_client_tls_config(&self) -> ClientTlsConfig {
+        ClientTlsConfig::new()
+            .rustls_client_config(self.client.clone())
+            .domain_name(self.server_name())
+    }
+
+    pub fn tonic_server_tls_config(&self) -> ServerTlsConfig {
+        ServerTlsConfig::new().rustls_server_config(self.server.clone())
+    }
+
+    pub fn channel(&self, addr: SocketAddr) -> Result<Channel> {
+        let tls = self.tonic_client_tls_config();
+
+        let url = format!("https://{}", addr);
+        let channel = Channel::from_shared(url)?.tls_config(tls)?.connect_lazy();
+        Ok(channel)
+    }
+
+    pub fn server_builder(&self) -> Result<Server> {
+        let tls = self.tonic_server_tls_config();
+        let server = Server::builder().tls_config(tls)?;
+        Ok(server)
+    }
+
     fn generate_cert(
-        keypair: &ed25519_dalek::Keypair,
+        keypair: ed25519_dalek::Keypair,
         server_name: &str,
     ) -> (rustls::Certificate, rustls::PrivateKey) {
         let key_der = rustls::PrivateKey(keypair.to_pkcs8_bytes());
-        let keypair = ed25519_dalek::Keypair::from_bytes(&keypair.to_bytes()).unwrap();
         let certificate =
             Ed25519::keypair_to_certificate(vec![server_name.to_owned()], keypair).unwrap();
         (certificate, key_der)
