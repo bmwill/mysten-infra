@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "anemo",
+    "grpc",
     "component",
     "name_variant",
     "rccheck",
